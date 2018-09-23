@@ -19,6 +19,10 @@ class Node:
         # data into the left/right node
         self.split_point = None
 
+def get_most_common_category(data):
+    categories = [row[-1] for row in data]
+    return max(set(categories), key=categories.count)
+
 class Tree:
     def __init__(self, data, depth, max_depth, min_size, n_features):
         self.data, self.depth, self.max_depth, self.min_size, self.n_features \
@@ -100,6 +104,7 @@ class Tree:
         else:
             return root.right.predict(row)
 
+
 class RandomForest:
     def __init__(self, data, n_trees, max_depth, min_size, n_features, n_sample_rate):
         self.data, self.n_trees, self.max_depth, self.min_size \
@@ -119,9 +124,17 @@ class RandomForest:
             prediction.append(tree.predict(row))
         return max(set(prediction), key=prediction.count)
 
-def get_most_common_category(data):
-    categories = [row[-1] for row in data]
-    return max(set(categories), key=categories.count)
+    def accuracy(self, validate_data):
+        n_total = 0
+        n_correct = 0
+        predicted_categories = [self.predict(row[:-1]) for row in validate_data]
+        correct_categories = [row[-1] for row in validate_data]
+        for predicted_category, correct_category in zip(predicted_categories, correct_categories):
+            n_total += 1
+            if predicted_category == correct_category:
+                n_correct += 1
+        return n_correct / n_total
+
 
 class CrossValidationSplitter:
     def __init__(self, data, k_fold):
