@@ -26,9 +26,10 @@ class Node:
         # data into the left/right node
         self.split_point = None
 
-def get_most_common_category(data):
-    categories = [row[-1] for row in data]
-    return max(set(categories), key=categories.count)
+    def set_most_common_category(self):
+        data = self.data
+        categories = [row[-1] for row in data]
+        self.category = max(set(categories), key=categories.count)
 
 class Tree:
     def __init__(self, data, depth, max_depth, min_size, n_features):
@@ -38,18 +39,18 @@ class Tree:
         x, y = self.get_split_point()
         left_group, right_group = self.split(x, y)
         if len(left_group) == 0 or len(right_group) == 0 or depth >= max_depth:
-            root.category = get_most_common_category(left_group + right_group)
+            root.set_most_common_category()
         else:
             root.split_point = (x, y)
             if len(left_group) < min_size:
                 root.left = Node(left_group)
-                root.left.category = get_most_common_category(left_group)
+                root.left.set_most_common_category()
             else:
                 root.left = Tree(left_group, depth + 1, max_depth, min_size, n_features)
 
             if len(right_group) < min_size:
                 root.right = Node(right_group)
-                root.right.category = get_most_common_category(right_group)
+                root.right.set_most_common_category()
             else:
                 root.right = Tree(right_group, depth + 1, max_depth, min_size, n_features)
 
@@ -198,6 +199,5 @@ if __name__ == "__main__":
             accuracies.append(model.accuracy(validate_data))
         validation_accuracy = np.mean(accuracies)
         test_accuracy = model.accuracy(splitter.test_data)
-        print(f"Mean cross validation accuracy for {n_tree} trees: \
-            {validation_accuracy}")
+        print(f"Mean cross validation accuracy for {n_tree} trees: {validation_accuracy}")
         print(f"Test accuracy for {n_tree} trees: {test_accuracy}")
