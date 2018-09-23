@@ -7,29 +7,26 @@ from math import sqrt
 
 random.seed(42)
 
+
 class Node:
     def __init__(self, data):
-
         # all the data that is held by this node
         self.data = data
-
         # left child node
         self.left = None
-
         # right child node
         self.right = None
-
         # category if the current node is a leaf node
         self.category = None
-
-        # a tuple: (row, column), representing the point where we split the
-        # data into the left/right node
+        # a tuple: (row, column), representing the point where
+        # we split the data into the left/right node
         self.split_point = None
 
     def set_most_common_category(self):
         data = self.data
         categories = [row[-1] for row in data]
         self.category = max(set(categories), key=categories.count)
+
 
 class Tree:
     def __init__(self, data, depth, max_depth, min_size, n_features):
@@ -148,8 +145,8 @@ class CrossValidationSplitter:
     def __init__(self, all_data, k_fold, rate):
         self.all_data, self.k_fold, self.rate = all_data, k_fold, rate
         self.n_iteration = 0
-        self.train_data, self.test_data = self.train_test_split()
-        self.n_batch = (1 / self.k_fold) * len(self.train_data)
+        self.train_validate_data, self.test_data = self.train_validate_test_split()
+        self.n_batch = (1 / self.k_fold) * len(self.train_validate_data)
 
     def __iter__(self):
         return self
@@ -161,7 +158,7 @@ class CrossValidationSplitter:
         return self.load_data()
 
     def load_data(self):
-        data_copy = self.train_data[:]
+        data_copy = self.train_validate_data[:]
         train_data = []
         while len(train_data) < self.n_batch:
             train_data.append(self.pop_random_row(data_copy))
@@ -172,11 +169,11 @@ class CrossValidationSplitter:
         random.shuffle(data)
         return data[0]
 
-    def train_test_split(self):
+    def train_validate_test_split(self):
         rate, all_data = self.rate, self.all_data
         random.shuffle(all_data)
-        n_train_data = int(len(all_data) * rate)
-        return all_data[: n_train_data], all_data[n_train_data:]
+        n_train_validate_data = int(len(all_data) * rate)
+        return all_data[: n_train_validate_data], all_data[n_train_validate_data:]
 
 
 if __name__ == "__main__":
