@@ -1,6 +1,5 @@
 import random
 
-
 class Node:
     def __init__(self, data):
 
@@ -16,8 +15,8 @@ class Node:
         # category if the current node is a leaf node
         self.category = None
 
-        # a tuple: (row, column), representing the point where we split the data
-        # into the left/right node
+        # a tuple: (row, column), representing the point where we split the
+        # data into the left/right node
         self.split_point = None
 
 class Tree:
@@ -26,7 +25,7 @@ class Tree:
             = data, depth, max_depth, min_size, n_features
         self.root = root = Node(data)
         x, y = self.get_split_point()
-        left_group, right_group = split(data, x, y)
+        left_group, right_group = self.split(x, y)
         if len(left_group) == 0 or len(right_group) == 0 or depth >= max_depth:
             root.category = get_most_common_category(left_group + right_group)
         else:
@@ -43,82 +42,111 @@ class Tree:
             else:
                 root.right = Tree(right_group, depth + 1, max_depth, min_size, n_features)
 
-    def get_split_point(self):
+    def get_features(self):
         data, n_features = self.data, self.n_features
         n_total_features = len(data[0]) - 1
-        features = get_features(n_features, n_total_features)
-        categories = get_categories(data)
+        features = [i for i in range(n_total_features)]
+        random.shuffle(features)
+        return features[:n_features]
+
+    def get_split_point(self):
+        data = self.data
+        features = self.get_features()
         x, y, gini_index = None, None, None
         for index in range(len(data)):
             for feature in features:
-                left, right = split(data, index, feature)
-                current_gini_index = get_gini_index(left, right, categories)
+                left, right = self.split(index, feature)
+                current_gini_index = self.get_gini_index(left, right)
                 if gini_index is None or current_gini_index < gini_index:
                     x, y, gini_index = index, feature, current_gini_index
         return x, y
 
-def predict_with_single_tree(tree, row):
-    if tree.root.category is not None:
-        return tree.root.category
-    x, y = tree.root.split_point
-    split_value = tree.root.data[x][y]
-    if row[y] <= split_value:
-        return predict_with_single_tree(tree.root.left, row)
-    else:
-        return predict_with_single_tree(tree.root.right, row)
+    def split(self, x, y):
+        data = self.data
+        split_value = data[x][y]
+        left, right = [], []
+        for row in data:
+            if row[y] <= split_value:
+                left.append(row)
+            else:
+                right.append(row)
+        return left, right
 
+    def get_categories(self):
+        data = self.data
+        return set([row[-1] for row in data])
 
-def build_model(train_data, n_trees, max_depth, min_size, n_features, n_sample_rate):
-    trees = []
-    for i in range(n_trees):
-        random.shuffle(train_data)
-        n_samples = int(len(train_data) * n_sample_rate)
-        tree = Tree(train_data[: n_samples], 1, max_depth, min_size, n_features)
-        trees.append(tree)
-    return trees
+    def get_gini_index(self, left, right):
+        categories = self.get_categories()
+        gini_index = 0
+        for group in left, right:
+            if len(group) == 0:
+                continue
+            score = 0
+            for category in categories:
+                p = [row[-1] for row in group].count(category) / len(group)
+                score += p * p
+            gini_index += (1 - score) * (len(group) / len(left + right))
+        return gini_index
 
+    def predict(self, row):
+        root = self.root
+        if root.category is not None:
+            return root.category
+        x, y = root.split_point
+        split_value = root.data[x][y]
+        if row[y] <= split_value:
+            return root.left.predict(row)
+        else:
+            return root.right.predict(row)
 
-def predict(trees, row):
-    prediction = []
-    for tree in trees:
-        prediction.append(predict_with_single_tree(tree, row))
-    return max(set(prediction), key=prediction.count)
+class RandomForest:
+    def __init__(self, data, n_trees, max_depth, min_size, n_features, n_sample_rate):
+        self.data, self.n_trees, self.max_depth, self.min_size \
+            = data, n_trees, max_depth, min_size
+        self.n_features, self.n_sample_rate = n_features, n_sample_rate
+        self.trees = trees = []
+        for i in range(n_trees):
+            random.shuffle(data)
+            n_samples = int(len(data) * n_sample_rate)
+            tree = Tree(data[: n_samples], 1, max_depth, min_size, n_features)
+            trees.append(tree)
 
+    def predict(self, row):
+        trees = self.trees
+        prediction = []
+        for tree in trees:
+            prediction.append(tree.predict(row))
+        return max(set(prediction), key=prediction.count)
 
 def get_most_common_category(data):
     categories = [row[-1] for row in data]
     return max(set(categories), key=categories.count)
 
-def get_features(n_selected_features, n_total_features):
-    features = [i for i in range(n_total_features)]
-    random.shuffle(features)
-    return features[:n_selected_features]
+class CrossValidationSplitter:
+    def __init__(self, data, k_fold):
+        self.data = data
+        self.k_fold = k_fold
+        self.n_iteration = 0
 
+    def __iter__(self):
+        return self
 
-def get_categories(data):
-    return set([row[-1] for row in data])
+    def __next__(self):
+        if self.n_iteration >= self.k_fold:
+            raise StopIteration
+        self.n_iteration += 1
+        return self.__load_data()
 
+    def __load_data(self):
+        n_train_data = (1 / self.k_fold) * len(self.data)
+        data_copy = self.data[:]
+        train_data = []
+        while len(train_data) < n_train_data:
+            train_data.append(self.__pop_random_row(data_copy))
+        test_data = data_copy
+        return train_data, test_data
 
-
-def get_gini_index(left, right, categories):
-    gini_index = 0
-    for group in left, right:
-        if len(group) == 0:
-            continue
-        score = 0
-        for category in categories:
-            p = [row[-1] for row in group].count(category) / len(group)
-            score += p * p
-        gini_index += (1 - score) * (len(group) / len(left + right))
-    return gini_index
-
-
-def split(data, x, y):
-    split_value = data[x][y]
-    left, right = [], []
-    for row in data:
-        if row[y] <= split_value:
-            left.append(row)
-        else:
-            right.append(row)
-    return left, right
+    def __pop_random_row(self, data):
+        random.shuffle(data)
+        return data[0]
