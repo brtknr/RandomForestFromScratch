@@ -1,4 +1,11 @@
+#!/usr/bin/env python
+
 import random
+import numpy as np
+import pandas as pd
+from math import sqrt
+
+random.seed(42)
 
 class Node:
     def __init__(self, data):
@@ -137,10 +144,11 @@ class RandomForest:
 
 
 class CrossValidationSplitter:
-    def __init__(self, data, k_fold):
-        self.data = data
-        self.k_fold = k_fold
+    def __init__(self, all_data, k_fold, rate):
+        self.all_data, self.k_fold, self.rate = all_data, k_fold, rate
         self.n_iteration = 0
+        self.train_data, self.test_data = self.train_test_split()
+        self.n_batch = (1 / self.k_fold) * len(self.train_data)
 
     def __iter__(self):
         return self
@@ -149,17 +157,47 @@ class CrossValidationSplitter:
         if self.n_iteration >= self.k_fold:
             raise StopIteration
         self.n_iteration += 1
-        return self.__load_data()
+        return self.load_data()
 
-    def __load_data(self):
-        n_train_data = (1 / self.k_fold) * len(self.data)
-        data_copy = self.data[:]
+    def load_data(self):
+        data_copy = self.train_data[:]
         train_data = []
-        while len(train_data) < n_train_data:
-            train_data.append(self.__pop_random_row(data_copy))
-        test_data = data_copy
-        return train_data, test_data
+        while len(train_data) < self.n_batch:
+            train_data.append(self.pop_random_row(data_copy))
+        validate_data = data_copy
+        return train_data, validate_data
 
-    def __pop_random_row(self, data):
+    def pop_random_row(self, data):
         random.shuffle(data)
         return data[0]
+
+    def train_test_split(self):
+        rate, all_data = self.rate, self.all_data
+        random.shuffle(all_data)
+        n_train_data = int(len(all_data) * rate)
+        return all_data[: n_train_data], all_data[n_train_data:]
+
+
+if __name__ == "__main__":
+    df = pd.read_csv('resources/sonar.all-data.csv', header=None)
+    data = df.values.tolist()
+    for n_tree in [1, 5, 25]:
+        accuracies = []
+        model = None
+        splitter = CrossValidationSplitter(data, k_fold=5, rate=0.9)
+        for train_data, validate_data in splitter:
+            n_features = int(sqrt(len(train_data[0]) - 1))
+            model = RandomForest(
+                data=train_data,
+                n_trees=n_tree,
+                max_depth=5,
+                min_size=1,
+                n_features=n_features,
+                n_sample_rate=0.9
+            )
+            accuracies.append(model.accuracy(validate_data))
+        validation_accuracy = np.mean(accuracies)
+        test_accuracy = model.accuracy(splitter.test_data)
+        print(f"Mean cross validation accuracy for {n_tree} trees: \
+            {validation_accuracy}")
+        print(f"Test accuracy for {n_tree} trees: {test_accuracy}")
