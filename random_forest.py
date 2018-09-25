@@ -1,9 +1,9 @@
 #!/usr/bin/env python
 
+from math import sqrt
 import random
 import numpy as np
 import pandas as pd
-from math import sqrt
 
 random.seed(42)
 
@@ -33,8 +33,10 @@ class Tree:
         self.data, self.depth, self.max_depth, self.min_size, self.n_features \
             = data, depth, max_depth, min_size, n_features
         self.root = root = Node(data)
-        x, y = self.get_split_point()
-        left_group, right_group = self.split(x, y)
+        self.categories = self.__get_categories()
+        self.features = self.__get_features()
+        root.split_point = (x, y) = self.__get_split_point()
+        left_group, right_group = self.__split(x, y)
         if len(left_group) == 0 or len(right_group) == 0 or depth >= max_depth:
             root.set_most_common_category()
         else:
@@ -43,34 +45,40 @@ class Tree:
                 root.left = Node(left_group)
                 root.left.set_most_common_category()
             else:
-                root.left = Tree(left_group, depth + 1, max_depth, min_size, n_features)
+                root.left = Tree(left_group, depth + 1,
+                                 max_depth, min_size, n_features)
 
             if len(right_group) < min_size:
                 root.right = Node(right_group)
                 root.right.set_most_common_category()
             else:
-                root.right = Tree(right_group, depth + 1, max_depth, min_size, n_features)
+                root.right = Tree(right_group, depth + 1,
+                                  max_depth, min_size, n_features)
 
-    def get_features(self):
+    def __get_categories(self):
+        data = self.data
+        return set([row[-1] for row in data])
+
+    def __get_features(self):
         data, n_features = self.data, self.n_features
         n_total_features = len(data[0]) - 1
         features = [i for i in range(n_total_features)]
         random.shuffle(features)
         return features[:n_features]
 
-    def get_split_point(self):
+    def __get_split_point(self):
         data = self.data
-        features = self.get_features()
+        features = self.features
         x, y, gini_index = None, None, None
         for index in range(len(data)):
             for feature in features:
-                left, right = self.split(index, feature)
-                current_gini_index = self.get_gini_index(left, right)
+                left, right = self.__split(index, feature)
+                current_gini_index = self.__get_gini_index(left, right)
                 if gini_index is None or current_gini_index < gini_index:
                     x, y, gini_index = index, feature, current_gini_index
         return x, y
 
-    def split(self, x, y):
+    def __split(self, x, y):
         data = self.data
         split_value = data[x][y]
         left, right = [], []
@@ -81,12 +89,8 @@ class Tree:
                 right.append(row)
         return left, right
 
-    def get_categories(self):
-        data = self.data
-        return set([row[-1] for row in data])
-
-    def get_gini_index(self, left, right):
-        categories = self.get_categories()
+    def __get_gini_index(self, left, right):
+        categories = self.categories
         gini_index = 0
         for group in left, right:
             if len(group) == 0:
@@ -132,7 +136,8 @@ class RandomForest:
     def accuracy(self, validate_data):
         n_total = 0
         n_correct = 0
-        predicted_categories = [self.predict(row[:-1]) for row in validate_data]
+        predicted_categories = [self.predict(
+            row[:-1]) for row in validate_data]
         correct_categories = [row[-1] for row in validate_data]
         for predicted_category, correct_category in zip(predicted_categories, correct_categories):
             n_total += 1
@@ -145,8 +150,7 @@ class CrossValidationSplitter:
     def __init__(self, all_data, k_fold, rate):
         self.all_data, self.k_fold, self.rate = all_data, k_fold, rate
         self.n_iteration = 0
-        self.train_validate_data, self.test_data = self.train_validate_test_split()
-        self.n_batch = (1 / self.k_fold) * len(self.train_validate_data)
+        self.__do_train_test_split()
 
     def __iter__(self):
         return self
@@ -155,35 +159,35 @@ class CrossValidationSplitter:
         if self.n_iteration >= self.k_fold:
             raise StopIteration
         self.n_iteration += 1
-        return self.load_data()
+        return self.__get_train_validate_split()
 
-    def load_data(self):
-        data_copy = self.train_validate_data[:]
-        train_data = []
-        while len(train_data) < self.n_batch:
-            train_data.append(self.pop_random_row(data_copy))
-        validate_data = data_copy
+    def __get_train_validate_split(self):
+        data = self.train_validate_data[:]
+        random.shuffle(data)
+        train_data = data[self.n_train_validate_split:]
+        validate_data = data[:self.n_train_validate_split]
         return train_data, validate_data
 
-    def pop_random_row(self, data):
-        random.shuffle(data)
-        return data[0]
-
-    def train_validate_test_split(self):
+    def __do_train_test_split(self):
         rate, all_data = self.rate, self.all_data
         random.shuffle(all_data)
-        n_train_validate_data = int(len(all_data) * rate)
-        return all_data[: n_train_validate_data], all_data[n_train_validate_data:]
+        n_train_test_split = int(len(all_data) * rate)
+        self.train_validate_data = all_data[: n_train_test_split]
+        self.test_data = all_data[n_train_test_split:]
+        self.n_train_validate_split = len(
+            self.train_validate_data)//self.k_fold
 
 
 if __name__ == "__main__":
-    df = pd.read_csv('resources/sonar.all-data.csv', header=None)
-    data = df.values.tolist()
-    for n_tree in [1, 5, 25]:
+    data = pd.read_csv(
+        'resources/sonar.all-data.csv', header=None
+    ).values.tolist()
+    for n_tree in [1, 4, 16]:
         accuracies = []
         model = None
         splitter = CrossValidationSplitter(data, k_fold=5, rate=0.9)
         for train_data, validate_data in splitter:
+            #print(len(data), len(train_data), len(validate_data))
             n_features = int(sqrt(len(train_data[0]) - 1))
             model = RandomForest(
                 data=train_data,
@@ -196,5 +200,6 @@ if __name__ == "__main__":
             accuracies.append(model.accuracy(validate_data))
         validation_accuracy = np.mean(accuracies)
         test_accuracy = model.accuracy(splitter.test_data)
-        print(f"Mean cross validation accuracy for {n_tree} trees: {validation_accuracy}")
+        print(
+            f"Mean cross validation accuracy for {n_tree} trees: {validation_accuracy}")
         print(f"Test accuracy for {n_tree} trees: {test_accuracy}")
