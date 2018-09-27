@@ -4,6 +4,7 @@ from math import sqrt
 import random
 import numpy as np
 import pandas as pd
+import pdb
 
 random.seed(42)
 
@@ -12,48 +13,20 @@ class Node:
     def __init__(self, data):
         # all the data that is held by this node
         self.data = data
-        # left child node
-        self.left = None
-        # right child node
-        self.right = None
+        # child nodes
+        self.child = dict()
         # category if the current node is a leaf node
         self.category = None
+        # get categories
+        self.categories = self.__get_categories()
+        # calculate number of features
+        self.n_features = int(sqrt(len(data[0]) - 1))
+        # features
+        self.features = self.__get_features()
         # a tuple: (row, column), representing the point where
         # we split the data into the left/right node
-        self.split_point = None
-
-    def set_most_common_category(self):
-        data = self.data
-        categories = [row[-1] for row in data]
-        self.category = max(set(categories), key=categories.count)
-
-
-class Tree:
-    def __init__(self, data, depth, max_depth, min_size, n_features):
-        self.data, self.depth, self.max_depth, self.min_size, self.n_features \
-            = data, depth, max_depth, min_size, n_features
-        self.root = root = Node(data)
-        self.categories = self.__get_categories()
-        self.features = self.__get_features()
-        root.split_point = (x, y) = self.__get_split_point()
-        left_group, right_group = self.__split(x, y)
-        if len(left_group) == 0 or len(right_group) == 0 or depth >= max_depth:
-            root.set_most_common_category()
-        else:
-            root.split_point = (x, y)
-            if len(left_group) < min_size:
-                root.left = Node(left_group)
-                root.left.set_most_common_category()
-            else:
-                root.left = Tree(left_group, depth + 1,
-                                 max_depth, min_size, n_features)
-
-            if len(right_group) < min_size:
-                root.right = Node(right_group)
-                root.right.set_most_common_category()
-            else:
-                root.right = Tree(right_group, depth + 1,
-                                  max_depth, min_size, n_features)
+        self.split_point = self.__get_split_point() 
+        self.left_group, self.right_group = self.__split(*self.split_point)
 
     def __get_categories(self):
         data = self.data
@@ -102,6 +75,25 @@ class Tree:
             gini_index += (1 - score) * (len(group) / len(left + right))
         return gini_index
 
+    def most_common_category(self):
+        data = self.data
+        categories = [row[-1] for row in data]
+        return max(set(categories), key=categories.count)
+
+class Tree:
+    def __init__(self, data, depth, max_depth, min_size):
+        self.root = root = Node(data)
+        left_group, right_group = root.left_group, root.right_group
+        if len(left_group) == 0 or len(right_group) == 0 or depth >= max_depth:
+            root.category = root.most_common_category()
+        else:
+            for i, group in enumerate([left_group, right_group]):
+                if len(group) < min_size:
+                    root.child[i] = Node(group)
+                    root.category = root.most_common_category()
+                else:
+                    root.child[i] = Tree(group, depth + 1, max_depth, min_size)
+
     def predict(self, row):
         root = self.root
         if root.category is not None:
@@ -109,21 +101,18 @@ class Tree:
         x, y = root.split_point
         split_value = root.data[x][y]
         if row[y] <= split_value:
-            return root.left.predict(row)
+            return root.child[0].predict(row)
         else:
-            return root.right.predict(row)
+            return root.child[1].predict(row)
 
 
 class RandomForest:
-    def __init__(self, data, n_trees, max_depth, min_size, n_features, n_sample_rate):
-        self.data, self.n_trees, self.max_depth, self.min_size \
-            = data, n_trees, max_depth, min_size
-        self.n_features, self.n_sample_rate = n_features, n_sample_rate
+    def __init__(self, data, n_trees, max_depth, min_size, n_sample_rate):
         self.trees = trees = []
         for i in range(n_trees):
             random.shuffle(data)
             n_samples = int(len(data) * n_sample_rate)
-            tree = Tree(data[: n_samples], 1, max_depth, min_size, n_features)
+            tree = Tree(data[: n_samples], 1, max_depth, min_size)
             trees.append(tree)
 
     def predict(self, row):
@@ -186,15 +175,14 @@ if __name__ == "__main__":
         accuracies = []
         model = None
         splitter = CrossValidationSplitter(data, k_fold=5, rate=0.9)
+        #pdb.set_trace()
         for train_data, validate_data in splitter:
             #print(len(data), len(train_data), len(validate_data))
-            n_features = int(sqrt(len(train_data[0]) - 1))
             model = RandomForest(
                 data=train_data,
                 n_trees=n_tree,
                 max_depth=5,
                 min_size=1,
-                n_features=n_features,
                 n_sample_rate=0.9
             )
             accuracies.append(model.accuracy(validate_data))
