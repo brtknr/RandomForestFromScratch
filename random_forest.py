@@ -36,7 +36,7 @@ class Tree:
                 if len(this_group) < min_size:
                     self.category = self.most_common_category()
                 else:
-                    child.fit(this_group)
+                    child.fit(data[this_group])
 
     def __get_categories(self):
         return set(self.data[:,-1])
@@ -49,6 +49,7 @@ class Tree:
 
     def __get_split_point(self):
         data = self.data
+        #print(len(data))
         features = self.features
         x, y, gini_index = None, None, None
         for index in range(len(data)):
@@ -64,12 +65,12 @@ class Tree:
         data = self.data
         condition = data[:,y] > data[x, y]
         left, right = [], []
-        for cond, row in zip(condition, data):
+        for i, (cond, row) in enumerate(zip(condition, data)):
             if cond:
-                right.append(row)
+                right.append(i)
             else:
-                left.append(row)
-        return np.array(left), np.array(right)
+                left.append(i)
+        return left, right
 
     def __get_gini_index(self, left, right):
         categories = self.categories
@@ -79,26 +80,26 @@ class Tree:
                 continue
             score = 0
             for category in categories:
-                p = [row[-1] for row in group].count(category) / len(group)
+                p = self.data[group,-1].tolist().count(category) / len(group)
                 score += p * p
                 #pdb.set_trace()
             gini_index += (1 - score) * (len(group) / (len(left) + len(right)))
         return gini_index
 
     def most_common_category(self):
-        data = self.data
-        categories = [row[-1] for row in data]
+        categories = self.data[:,-1].tolist()
         return max(set(categories), key=categories.count)
 
     def predict(self, row):
         if self.category is not None:
             return self.category
-        x, y = self.split_point
-        split_value = self.data[x][y]
-        if row[y] <= split_value:
-            return self.child[0].predict(row)
+        i, j = self.split_point
+        split_value = self.data[i][j]
+        if row[j] <= split_value:
+            child = self.child[0]
         else:
-            return self.child[1].predict(row)
+            child = self.child[1]
+        return child.predict(row)
 
 
 class RandomForest:
