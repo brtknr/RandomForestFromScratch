@@ -3,6 +3,7 @@
 import numpy as np
 import pandas as pd
 import pdb
+import asyncio
 
 np.random.seed(42)
 
@@ -11,7 +12,7 @@ class Tree:
     def __init__(self, max_depth, min_size, depth=1):
         self.depth, self.max_depth, self.min_size = depth, max_depth, min_size
 
-    def fit(self, data):
+    async def fit(self, data):
         depth, max_depth, min_size = self.depth, self.max_depth, self.min_size
         # all the data that is held by this node
         self.data = data
@@ -36,7 +37,8 @@ class Tree:
                 if len(this_group) < min_size:
                     self.category = self.most_common_category()
                 else:
-                    child.fit(data[this_group])
+                    await child.fit(data[this_group])
+        return 1
 
     def __get_categories(self):
         return set(self.data[:,-1])
@@ -79,8 +81,9 @@ class Tree:
             if len(group) == 0:
                 continue
             score = 0
+            data_list = self.data[group,-1].tolist()
             for category in categories:
-                p = self.data[group,-1].tolist().count(category) / len(group)
+                p = data_list.count(category) / len(group)
                 score += p * p
                 #pdb.set_trace()
             gini_index += (1 - score) * (len(group) / (len(left) + len(right)))
@@ -107,10 +110,10 @@ class RandomForest:
         self.n_sample_rate = n_sample_rate
         self.trees = [Tree(max_depth, min_size) for i in range(n_trees)]
 
-    def fit(self, data):
+    async def fit(self, data):
         n_sample = int(len(data) * self.n_sample_rate)
         for tree in self.trees:
-            tree.fit(data[np.random.choice(len(data), n_sample)])
+            await tree.fit(data[np.random.choice(len(data), n_sample)])
 
     def predict(self, row):
         trees = self.trees
@@ -178,7 +181,7 @@ if __name__ == "__main__":
                 min_size=1,
                 n_sample_rate=0.9
             )
-            model.fit(train_data)
+            asyncio.run(model.fit(train_data))
             accuracies.append(model.accuracy(validate_data))
         validation_accuracy = np.mean(accuracies)
         test_accuracy = model.accuracy(splitter.test_data)
