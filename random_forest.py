@@ -4,100 +4,117 @@ import numpy as np
 import pandas as pd
 import pdb
 import asyncio
+import random
 
 np.random.seed(42)
 
 
 class Tree:
-    def __init__(self, max_depth, min_size, depth=1):
+    def __init__(self, index, max_depth, min_size, depth=1):
         self.depth, self.max_depth, self.min_size = depth, max_depth, min_size
+        self.index = index
 
-    async def fit(self, data):
+    def fit(self, data):
         depth, max_depth, min_size = self.depth, self.max_depth, self.min_size
-        # all the data that is held by this node
-        self.data = data
+        index = self.index
+        # print(self.index, self.depth)
         # child nodes
         self.child = dict()
         # category if the current node is a leaf node
         self.category = None
         # get categories
-        self.categories = self.__get_categories()
-        # features
-        self.features = self.__get_features()
+        self.categories = self.__get_categories(data)
         # a tuple: (row, column), representing the point where
         # we split the data into the left/right node
-        self.split_point = self.__get_split_point() 
-        self.left_group, self.right_group = self.__split(*self.split_point)
-        left_group, right_group = self.left_group, self.right_group
-        if len(left_group) == 0 or len(right_group) == 0 or depth >= max_depth:
-            self.category = self.most_common_category()
-        else:
-            for i, this_group in enumerate([left_group, right_group]):
-                self.child[i] = child = Tree(max_depth, min_size, depth+1)
-                if len(this_group) < min_size:
-                    self.category = self.most_common_category()
-                else:
-                    await child.fit(data[this_group])
+        self.split_point = self.__get_best_split_point(data) 
+        groups = self.__split(data, *self.split_point)
+        for i, group in enumerate(groups):
+            if len(group) < min_size or depth >= max_depth:
+                self.category = self.most_common_category(data)
+            else:
+                self.child[i] = child = Tree(index, max_depth, min_size, depth+1)
+                child.fit(group)
         return 1
 
-    def __get_categories(self):
-        return set(self.data[:,-1])
+    async def fit_async(self, data):
+        depth, max_depth, min_size = self.depth, self.max_depth, self.min_size
+        index = self.index
+        # print(self.index, self.depth)
+        # child nodes
+        self.child = dict()
+        # category if the current node is a leaf node
+        self.category = None
+        # get categories
+        self.categories = self.__get_categories(data)
+        # a tuple: (row, column), representing the point where
+        # we split the data into the left/right node
+        self.split_point = self.__get_best_split_point(data) 
+        groups = self.__split(data, *self.split_point)
+        jobs = []
+        for i, group in enumerate(groups):
+            if len(group) < min_size or depth >= max_depth:
+                self.category = self.most_common_category(data)
+            else:
+                self.child[i] = child = Tree(index, max_depth, min_size, depth+1)
+                jobs.append(child.fit(group))
+        await asyncio.gather(*jobs)
+        return 1
 
-    def __get_features(self):
-        data = self.data
-        n_all_features = data.shape[1] - 1
+    def __get_categories(self, data):
+        return set(row[-1] for row in data)
+
+    def __get_features(self, data):
+        n_all_features = len(data[0]) - 1
         n_features = int(np.sqrt(n_all_features))
         return np.random.choice(n_all_features, n_features, replace=False)
 
-    def __get_split_point(self):
-        data = self.data
-        #print(len(data))
-        features = self.features
-        x, y, gini_index = None, None, None
+    def __get_best_split_point(self, data):
+        # print(len(data))
+        features = self.__get_features(data)
+        x, y, sv, gini_index = None, None, None, None
         for index in range(len(data)):
-            #pdb.set_trace()
+            # pdb.set_trace()
             for feature in features:
-                left, right = self.__split(index, feature)
-                current_gini_index = self.__get_gini_index(left, right)
+                split_value = data[index][feature]
+                groups = self.__split(data, index, feature, split_value)
+                current_gini_index = self.__get_gini_index(data, groups)
                 if gini_index is None or current_gini_index < gini_index:
-                    x, y, gini_index = index, feature, current_gini_index
-        return x, y
+                    x, y, sv = index, feature, split_value
+                    gini_index = current_gini_index
+        return x, y, data[x][y]
 
-    def __split(self, x, y):
-        data = self.data
-        condition = data[:,y] > data[x, y]
+    def __split(self, data, x, y, split_value):
         left, right = [], []
-        for i, (cond, row) in enumerate(zip(condition, data)):
-            if cond:
-                right.append(i)
+        for i, row in enumerate(data):
+            if row[y] > split_value:
+                right.append(row)
             else:
-                left.append(i)
+                left.append(row)
         return left, right
 
-    def __get_gini_index(self, left, right):
+    def __get_gini_index(self, data, groups):
         categories = self.categories
         gini_index = 0
-        for group in left, right:
-            if len(group) == 0:
+        for group in groups:
+            n_group = len(group)
+            if n_group == 0:
                 continue
             score = 0
-            data_list = self.data[group,-1].tolist()
+            data_list = [row[-1] for row in data]
             for category in categories:
-                p = data_list.count(category) / len(group)
+                p = data_list.count(category) / n_group
                 score += p * p
-                #pdb.set_trace()
-            gini_index += (1 - score) * (len(group) / (len(left) + len(right)))
+            gini_index += (1 - score) * n_group / len(data)
         return gini_index
 
-    def most_common_category(self):
-        categories = self.data[:,-1].tolist()
+    def most_common_category(self, data):
+        categories = [row[-1] for row in data]
         return max(set(categories), key=categories.count)
 
     def predict(self, row):
         if self.category is not None:
             return self.category
-        i, j = self.split_point
-        split_value = self.data[i][j]
+        i, j, split_value = self.split_point
         if row[j] <= split_value:
             child = self.child[0]
         else:
@@ -108,29 +125,29 @@ class Tree:
 class RandomForest:
     def __init__(self, n_trees, max_depth, min_size, n_sample_rate):
         self.n_sample_rate = n_sample_rate
-        self.trees = [Tree(max_depth, min_size) for i in range(n_trees)]
+        self.trees = [Tree(index, max_depth, min_size) for index in range(n_trees)]
 
-    async def fit(self, data):
+    def sample_data(self, data):
         n_sample = int(len(data) * self.n_sample_rate)
-        for tree in self.trees:
-            await tree.fit(data[np.random.choice(len(data), n_sample)])
+        return random.sample(data, n_sample)
+
+    def fit(self, data):
+        _ = [tree.fit(self.sample_data(data)) for tree in self.trees]
+
+    async def fit_async(self, data):
+        await asyncio.gather(*[tree.fit_async(self.sample_data(data)) for tree in self.trees])
 
     def predict(self, row):
-        trees = self.trees
-        prediction = [tree.predict(row) for tree in trees]
+        prediction = [tree.predict(row) for tree in self.trees]
         return max(set(prediction), key=prediction.count)
 
     def accuracy(self, validate_data):
-        n_total = 0
         n_correct = 0
-        predicted_categories = [self.predict(
-            row[:-1]) for row in validate_data]
-        correct_categories = [row[-1] for row in validate_data]
-        for predicted_category, correct_category in zip(predicted_categories, correct_categories):
-            n_total += 1
-            if predicted_category == correct_category:
+        categories = [(self.predict(row[:-1]), row[-1]) for row in validate_data]
+        for pred_category, true_category in categories:
+            if pred_category == true_category:
                 n_correct += 1
-        return n_correct / n_total
+        return n_correct / len(validate_data)
 
 
 class CrossValidationSplitter:
@@ -150,7 +167,7 @@ class CrossValidationSplitter:
 
     def __get_train_validate_split(self):
         data = self.train_validate_data[:]
-        np.random.shuffle(data)
+        random.shuffle(data)
         train_data = data[self.n_train_validate_split:]
         validate_data = data[:self.n_train_validate_split]
         return train_data, validate_data
@@ -167,8 +184,9 @@ class CrossValidationSplitter:
 
 
 if __name__ == "__main__":
-    data = pd.read_csv('resources/sonar.all-data.csv', header=None).values
-    for n_tree in [1, 4, 16]:
+    data = pd.read_csv('resources/sonar.all-data.csv',
+            header=None).values.tolist()
+    for n_tree in [1,4,16]:
         accuracies = []
         model = None
         splitter = CrossValidationSplitter(data, k_fold=5, rate=0.9)
@@ -181,7 +199,8 @@ if __name__ == "__main__":
                 min_size=1,
                 n_sample_rate=0.9
             )
-            asyncio.run(model.fit(train_data))
+            #asyncio.run(model.fit(train_data))
+            model.fit(train_data)
             accuracies.append(model.accuracy(validate_data))
         validation_accuracy = np.mean(accuracies)
         test_accuracy = model.accuracy(splitter.test_data)
