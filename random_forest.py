@@ -9,14 +9,18 @@ import pdb
 random.seed(42)
 
 
-class Node:
-    def __init__(self, data):
+class Tree:
+    def __init__(self, depth, max_depth, min_size):
+        self.depth, self.max_depth, self.min_size = depth, max_depth, min_size
+        # category if the current node is a leaf node
+        self.category = None
+
+    def fit(self, data):
+        depth, max_depth, min_size = self.depth, self.max_depth, self.min_size
         # all the data that is held by this node
         self.data = data
         # child nodes
         self.child = dict()
-        # category if the current node is a leaf node
-        self.category = None
         # get categories
         self.categories = self.__get_categories()
         # calculate number of features
@@ -26,7 +30,17 @@ class Node:
         # a tuple: (row, column), representing the point where
         # we split the data into the left/right node
         self.split_point = self.__get_split_point() 
-        self.left_group, self.right_group = self.__split(*self.split_point)
+        left, right = self.__split(*self.split_point)
+        if len(left) == 0 or len(right) == 0 or depth >= max_depth:
+            self.category = self.most_common_category()
+        else:
+            for i, group in enumerate([left, right]):
+                if len(group) < min_size:
+                    self.category = self.most_common_category()
+                else:
+                    child = self.child[i] = Tree(depth + 1, max_depth, min_size)
+                    child.fit(group)
+
 
     def __get_categories(self):
         data = self.data
@@ -80,40 +94,30 @@ class Node:
         categories = [row[-1] for row in data]
         return max(set(categories), key=categories.count)
 
-class Tree:
-    def __init__(self, data, depth, max_depth, min_size):
-        self.root = root = Node(data)
-        left_group, right_group = root.left_group, root.right_group
-        if len(left_group) == 0 or len(right_group) == 0 or depth >= max_depth:
-            root.category = root.most_common_category()
-        else:
-            for i, group in enumerate([left_group, right_group]):
-                if len(group) < min_size:
-                    root.child[i] = Node(group)
-                    root.category = root.most_common_category()
-                else:
-                    root.child[i] = Tree(group, depth + 1, max_depth, min_size)
-
     def predict(self, row):
-        root = self.root
-        if root.category is not None:
-            return root.category
-        x, y = root.split_point
-        split_value = root.data[x][y]
+        if self.category is not None:
+            return self.category
+        x, y = self.split_point
+        split_value = self.data[x][y]
         if row[y] <= split_value:
-            return root.child[0].predict(row)
+            return self.child[0].predict(row)
         else:
-            return root.child[1].predict(row)
+            return self.child[1].predict(row)
 
 
 class RandomForest:
-    def __init__(self, data, n_trees, max_depth, min_size, n_sample_rate):
+    def __init__(self, n_trees, n_sample_rate, max_depth, min_size):
+        self.n_sample_rate = n_sample_rate
         self.trees = trees = []
         for i in range(n_trees):
-            random.shuffle(data)
-            n_samples = int(len(data) * n_sample_rate)
-            tree = Tree(data[: n_samples], 1, max_depth, min_size)
+            tree = Tree(1, max_depth, min_size)
             trees.append(tree)
+
+    def fit(self, data):
+        n_samples = int(len(data) * self.n_sample_rate)
+        for tree in self.trees:
+            random.shuffle(data)
+            tree = tree.fit(data[: n_samples])
 
     def predict(self, row):
         trees = self.trees
@@ -123,16 +127,12 @@ class RandomForest:
         return max(set(prediction), key=prediction.count)
 
     def accuracy(self, validate_data):
-        n_total = 0
         n_correct = 0
-        predicted_categories = [self.predict(
-            row[:-1]) for row in validate_data]
-        correct_categories = [row[-1] for row in validate_data]
-        for predicted_category, correct_category in zip(predicted_categories, correct_categories):
-            n_total += 1
+        pairs = [(self.predict(row[:-1]), row[-1]) for row in validate_data]
+        for predicted_category, correct_category in pairs:
             if predicted_category == correct_category:
                 n_correct += 1
-        return n_correct / n_total
+        return n_correct / len(validate_data)
 
 
 class CrossValidationSplitter:
@@ -179,12 +179,12 @@ if __name__ == "__main__":
         for train_data, validate_data in splitter:
             #print(len(data), len(train_data), len(validate_data))
             model = RandomForest(
-                data=train_data,
                 n_trees=n_tree,
+                n_sample_rate=0.9,
                 max_depth=5,
                 min_size=1,
-                n_sample_rate=0.9
             )
+            model.fit(data=train_data)
             accuracies.append(model.accuracy(validate_data))
         validation_accuracy = np.mean(accuracies)
         test_accuracy = model.accuracy(splitter.test_data)
