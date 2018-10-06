@@ -10,68 +10,49 @@ np.random.seed(42)
 
 
 class Tree:
-    def __init__(self, index, max_depth, min_size, depth=1):
+    def __init__(self, depth, max_depth, min_size):
         self.depth, self.max_depth, self.min_size = depth, max_depth, min_size
-        self.index = index
+        # category if the current node is a leaf node
+        self.category = None
 
     def fit(self, data):
         depth, max_depth, min_size = self.depth, self.max_depth, self.min_size
-        index = self.index
-        # print(self.index, self.depth)
+        # all the data that is held by this node
+        self.data = data
         # child nodes
         self.child = dict()
-        # category if the current node is a leaf node
-        self.category = None
         # get categories
         self.categories = self.__get_categories(data)
         # a tuple: (row, column), representing the point where
         # we split the data into the left/right node
-        self.split_point = self.__get_best_split_point(data) 
-        groups = self.__split(data, *self.split_point)
-        for i, group in enumerate(groups):
-            if len(group) < min_size or depth >= max_depth:
-                self.category = self.most_common_category(data)
-            else:
-                self.child[i] = child = Tree(index, max_depth, min_size, depth+1)
-                child.fit(group)
-        return 1
+        self.split_point = self.__get_split_point() 
+        left, right = self.__split(*self.split_point)
+        if len(left) == 0 or len(right) == 0 or depth >= max_depth:
+            self.category = self.most_common_category()
+        else:
+            for i, group in enumerate([left, right]):
+                if len(group) < min_size:
+                    self.category = self.most_common_category()
+                else:
+                    child = self.child[i] = Tree(depth + 1, max_depth, min_size)
+                    child.fit(group)
 
-    async def fit_async(self, data):
-        depth, max_depth, min_size = self.depth, self.max_depth, self.min_size
-        index = self.index
-        # print(self.index, self.depth)
-        # child nodes
-        self.child = dict()
-        # category if the current node is a leaf node
-        self.category = None
-        # get categories
-        self.categories = self.__get_categories(data)
-        # a tuple: (row, column), representing the point where
-        # we split the data into the left/right node
-        self.split_point = self.__get_best_split_point(data) 
-        groups = self.__split(data, *self.split_point)
-        jobs = []
-        for i, group in enumerate(groups):
-            if len(group) < min_size or depth >= max_depth:
-                self.category = self.most_common_category(data)
-            else:
-                self.child[i] = child = Tree(index, max_depth, min_size, depth+1)
-                jobs.append(child.fit(group))
-        await asyncio.gather(*jobs)
-        return 1
 
-    def __get_categories(self, data):
-        return set(row[-1] for row in data)
+    def __get_categories(self):
+        data = self.data
+        return set([row[-1] for row in data])
 
-    def __get_features(self, data):
-        n_all_features = len(data[0]) - 1
-        n_features = int(np.sqrt(n_all_features))
-        return np.random.choice(n_all_features, n_features, replace=False)
+    def __get_features(self):
+        data, n_features = self.data, self.n_features
+        n_total_features = len(data[0]) - 1
+        features = [i for i in range(n_total_features)]
+        random.shuffle(features)
+        return features[:n_features]
 
-    def __get_best_split_point(self, data):
-        # print(len(data))
-        features = self.__get_features(data)
-        x, y, sv, gini_index = None, None, None, None
+    def __get_split_point(self):
+        data = self.data
+        features = self.features
+        x, y, gini_index = None, None, None
         for index in range(len(data)):
             # pdb.set_trace()
             for feature in features:
@@ -114,28 +95,27 @@ class Tree:
     def predict(self, row):
         if self.category is not None:
             return self.category
-        i, j, split_value = self.split_point
-        if row[j] <= split_value:
-            child = self.child[0]
+        x, y = self.split_point
+        split_value = self.data[x][y]
+        if row[y] <= split_value:
+            return self.child[0].predict(row)
         else:
-            child = self.child[1]
-        return child.predict(row)
+            return self.child[1].predict(row)
 
 
 class RandomForest:
-    def __init__(self, n_trees, max_depth, min_size, n_sample_rate):
+    def __init__(self, n_trees, n_sample_rate, max_depth, min_size):
         self.n_sample_rate = n_sample_rate
-        self.trees = [Tree(index, max_depth, min_size) for index in range(n_trees)]
-
-    def sample_data(self, data):
-        n_sample = int(len(data) * self.n_sample_rate)
-        return random.sample(data, n_sample)
+        self.trees = trees = []
+        for i in range(n_trees):
+            tree = Tree(1, max_depth, min_size)
+            trees.append(tree)
 
     def fit(self, data):
-        _ = [tree.fit(self.sample_data(data)) for tree in self.trees]
-
-    async def fit_async(self, data):
-        await asyncio.gather(*[tree.fit_async(self.sample_data(data)) for tree in self.trees])
+        n_samples = int(len(data) * self.n_sample_rate)
+        for tree in self.trees:
+            random.shuffle(data)
+            tree = tree.fit(data[: n_samples])
 
     def predict(self, row):
         prediction = [tree.predict(row) for tree in self.trees]
@@ -143,9 +123,9 @@ class RandomForest:
 
     def accuracy(self, validate_data):
         n_correct = 0
-        categories = [(self.predict(row[:-1]), row[-1]) for row in validate_data]
-        for pred_category, true_category in categories:
-            if pred_category == true_category:
+        pairs = [(self.predict(row[:-1]), row[-1]) for row in validate_data]
+        for predicted_category, correct_category in pairs:
+            if predicted_category == correct_category:
                 n_correct += 1
         return n_correct / len(validate_data)
 
@@ -195,11 +175,10 @@ if __name__ == "__main__":
             print(len(data), len(train_data), len(validate_data))
             model = RandomForest(
                 n_trees=n_tree,
+                n_sample_rate=0.9,
                 max_depth=5,
                 min_size=1,
-                n_sample_rate=0.9
             )
-            #asyncio.run(model.fit(train_data))
             model.fit(train_data)
             accuracies.append(model.accuracy(validate_data))
         validation_accuracy = np.mean(accuracies)
