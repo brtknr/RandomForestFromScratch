@@ -4,7 +4,7 @@ from math import sqrt
 import random
 import pandas as pd
 import pdb
-import asyncio
+from multiprocessing import Pool
 
 random.seed(42)
 
@@ -17,7 +17,7 @@ class Tree:
         # child nodes
         self.child = dict()
 
-    async def fit(self, data):
+    def fit(self, data):
         depth, max_depth, min_size = self.depth, self.max_depth, self.min_size
         # get categories
         categories = [row[-1] for row in data]
@@ -29,15 +29,13 @@ class Tree:
         # we split the data into the left/right node
         self.split_point = self.__get_split_point(data, features)
         left, right = self.__split(data, *self.split_point)
-        jobs = []
         for i, group in enumerate([left, right]):
             if len(group) < min_size or depth >= max_depth:
                 # Most common category
                 self.leaf_category = max(self.unique_categories, key=categories.count)
             else:
                 child = self.child[i] = Tree(depth + 1, max_depth, min_size)
-                jobs.append(child.fit(group))
-        await asyncio.gather(*jobs)
+                child.fit(group)
 
     def __get_subset_features(self, n_features):
         n_subset = int(sqrt(n_features))
@@ -88,18 +86,15 @@ class Tree:
 class RandomForest:
     def __init__(self, n_trees, n_sample_rate, max_depth, min_size):
         self.n_sample_rate = n_sample_rate
-        self.trees = trees = []
+        self.trees = []
         for i in range(n_trees):
             tree = Tree(1, max_depth, min_size)
-            trees.append(tree)
+            self.trees.append(tree)
 
-    async def fit(self, data):
+    def fit(self, data):
         n_samples = int(len(data) * self.n_sample_rate)
-        jobs = []
-        for tree in self.trees:
-            random.shuffle(data)
-            jobs.append(tree.fit(data[: n_samples]))
-        await asyncio.gather(*jobs)
+        fn = lambda tree: tree.fit(random.sample(data, n_samples))
+        return [*map(fn, self.trees)]
 
     def predict(self, row):
         trees = self.trees
@@ -135,7 +130,7 @@ class CrossValidationSplitter:
         random.shuffle(data)
         train_data = data[self.n_train_validate_split:]
         validate_data = data[:self.n_train_validate_split]
-        return train_data, validate_data
+        return train_data, validate_data, self.test_data
 
     def __do_train_test_split(self):
         rate, all_data = self.rate, self.all_data
@@ -147,26 +142,35 @@ class CrossValidationSplitter:
             self.train_validate_data)//self.k_fold
 
 
+def get_accuracies(batch):
+    train_data, validate_data, test_data = batch
+    # len(train_data), len(validate_data))
+    model = RandomForest(
+        n_trees=n_trees,
+        n_sample_rate=0.9,
+        max_depth=5,
+        min_size=1,
+    )
+    model.fit(data=train_data)
+    return model.accuracy(data=validate_data), model.accuracy(data=test_data)
+
 if __name__ == "__main__":
-    data = pd.read_csv(
+    all_data = pd.read_csv(
         'resources/sonar.all-data.csv', header=None
     ).values.tolist()
+    k_fold = 5
     for n_trees in [1, 4, 16]:
         accuracies = []
         model = None
-        splitter = CrossValidationSplitter(data, k_fold=5, rate=0.9)
+        splitter = CrossValidationSplitter(
+            all_data=all_data,
+            k_fold=k_fold,
+            rate=0.9,
+        )
         #pdb.set_trace()
-        for train_data, validate_data in splitter:
-            #print(len(data), len(train_data), len(validate_data))
-            model = RandomForest(
-                n_trees=n_trees,
-                n_sample_rate=0.9,
-                max_depth=5,
-                min_size=1,
-            )
-            asyncio.run(model.fit(data=train_data))
-            accuracies.append(model.accuracy(data=validate_data))
-        cv_accuracy = sum(accuracies)/n_trees
-        test_accuracy = model.accuracy(splitter.test_data)
-        print(f"Cross validation accuracy for {n_trees} trees: {cv_accuracy}")
+        pool = Pool(2)
+        val_accs, test_accs = zip(*[*pool.map(get_accuracies, splitter)])
+        cval_accuracy = sum(val_accs)/k_fold
+        test_accuracy = sum(test_accs)/k_fold
+        print(f"Cross validation accuracy for {n_trees} trees: {cval_accuracy}")
         print(f"Test accuracy for {n_trees} trees: {test_accuracy}")
