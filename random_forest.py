@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 
-from math import sqrt
 import random
 import pandas as pd
-import pdb
-from multiprocessing import Pool
+from math import sqrt
+from multiprocessing import Pool, cpu_count
 
 random.seed(42)
 
@@ -167,8 +166,7 @@ if __name__ == "__main__":
             k_fold=k_fold,
             rate=0.9,
         )
-        #pdb.set_trace()
-        pool = Pool(2)
+        pool = Pool(cpu_count()//2)
         val_accs, test_accs = zip(*[*pool.map(get_accuracies, splitter)])
         cval_accuracy = sum(val_accs)/k_fold
         test_accuracy = sum(test_accs)/k_fold
